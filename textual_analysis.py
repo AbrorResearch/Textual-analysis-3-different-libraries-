@@ -1,11 +1,16 @@
 """
-Textual Analysis using Loughran McDonald, VADER, and NLTK Opinion Lexicon
-This script analyzes text from an Excel file column using three different sentiment/lexicon dictionaries.
+Textual Analysis using Loughran McDonald, VADER, NLTK Opinion Lexicon, and Readability Metrics
+This script analyzes text from an Excel file column using three different sentiment/lexicon dictionaries
+plus readability indices (FOG and Flesch-Kincaid).
 
 Dictionaries Used:
 1. Loughran McDonald - Financial sentiment analysis (pyloughranmcdonald)
 2. VADER - Valence Aware Dictionary and sEntiment Reasoner (from nltk)
 3. NLTK Opinion Lexicon - General sentiment analysis (Harvard IV-4 based)
+
+Readability Metrics:
+1. FOG (Gunning FOG) Index - Years of education needed to understand the text
+2. Flesch Kincaid Grade Level - US school grade level needed to understand the text
 """
 
 import pandas as pd
@@ -16,6 +21,7 @@ from typing import Dict, List, Tuple
 import nltk
 from nltk.sentiment import SentimentIntensityAnalyzer
 from nltk.corpus import opinion_lexicon
+from nltk.tokenize import sent_tokenize, word_tokenize
 from pyloughranmcdonald import LMClassifier
 
 # Download required NLTK data
@@ -29,13 +35,19 @@ try:
 except LookupError:
     nltk.download('opinion_lexicon')
 
+try:
+    nltk.data.find('tokenizers/punkt')
+except LookupError:
+    nltk.download('punkt')
+
 
 class TextualAnalyzer:
     """
-    Performs textual analysis using three professional dictionaries:
+    Performs comprehensive textual analysis including:
     1. Loughran McDonald Dictionary (financial sentiment via pyloughranmcdonald)
     2. VADER (Valence Aware Dictionary and sEntiment Reasoner)
     3. NLTK Opinion Lexicon (Harvard IV-4 based)
+    4. Readability Metrics (FOG Index and Flesch-Kincaid Grade Level)
     """
     
     def __init__(self):
@@ -67,6 +79,150 @@ class TextualAnalyzer:
         words = text.split()
         
         return words
+    
+    def count_syllables(self, word: str) -> int:
+        """
+        Estimate syllable count in a word.
+        This is a simplified approximation.
+        Rules:
+        - Count vowel groups
+        - Subtract silent 'e'
+        - Adjust for common patterns
+        """
+        word = word.lower()
+        syllable_count = 0
+        vowels = "aeiou"
+        previous_was_vowel = False
+        
+        for char in word:
+            is_vowel = char in vowels
+            if is_vowel and not previous_was_vowel:
+                syllable_count += 1
+            previous_was_vowel = is_vowel
+        
+        # Adjust for silent 'e'
+        if word.endswith('e'):
+            syllable_count -= 1
+        
+        # Adjust for 'le' at end
+        if word.endswith('le') and len(word) > 2 and word[-3] not in vowels:
+            syllable_count += 1
+        
+        # Ensure at least 1 syllable
+        return max(1, syllable_count)
+    
+    def is_complex_word(self, word: str) -> bool:
+        """
+        Determine if a word is complex (3+ syllables, excluding proper nouns and common words)
+        Used for FOG index calculation
+        """
+        if len(word) <= 3:
+            return False
+        
+        syllables = self.count_syllables(word)
+        return syllables >= 3
+    
+    def calculate_fog_index(self, text: str) -> Dict:
+        """
+        Calculate Gunning FOG (Frequency of Gobbledygook) Index
+        
+        Formula: 0.4 * ((words/sentences) + 100 * (complex_words/words))
+        
+        Interpretation:
+        - 6: Elementary school level
+        - 9: High school level
+        - 13: College level
+        - 16+: Graduate school level
+        
+        Returns:
+        - fog_index: The FOG score
+        - complexity: Percentage of complex words
+        """
+        if pd.isna(text):
+            return {'FOG_index': 0, 'FOG_complexity': 0}
+        
+        # Count sentences
+        sentences = sent_tokenize(text)
+        num_sentences = len(sentences)
+        
+        if num_sentences == 0:
+            return {'FOG_index': 0, 'FOG_complexity': 0}
+        
+        # Count words
+        words = self.preprocess_text(text)
+        num_words = len(words)
+        
+        if num_words == 0:
+            return {'FOG_index': 0, 'FOG_complexity': 0}
+        
+        # Count complex words (3+ syllables)
+        complex_words = sum(1 for word in words if self.is_complex_word(word))
+        
+        # Calculate FOG index
+        fog_index = 0.4 * ((num_words / num_sentences) + 100 * (complex_words / num_words))
+        complexity_percent = (complex_words / num_words) * 100
+        
+        return {
+            'FOG_index': round(fog_index, 2),
+            'FOG_complexity': round(complexity_percent, 2)  # % of complex words
+        }
+    
+    def calculate_flesch_kincaid(self, text: str) -> Dict:
+        """
+        Calculate Flesch-Kincaid Grade Level Index
+        
+        Formula: 0.39 * (words/sentences) + 11.8 * (syllables/words) - 15.59
+        
+        Interpretation:
+        - 6-8: Easy to read
+        - 9-12: Medium difficulty
+        - 13-15: Difficult
+        - 16+: Very difficult
+        
+        Returns:
+        - flesch_kincaid_grade: The grade level
+        """
+        if pd.isna(text):
+            return {'Flesch_Kincaid_Grade': 0}
+        
+        # Count sentences
+        sentences = sent_tokenize(text)
+        num_sentences = len(sentences)
+        
+        if num_sentences == 0:
+            return {'Flesch_Kincaid_Grade': 0}
+        
+        # Count words
+        words = self.preprocess_text(text)
+        num_words = len(words)
+        
+        if num_words == 0:
+            return {'Flesch_Kincaid_Grade': 0}
+        
+        # Count syllables
+        total_syllables = sum(self.count_syllables(word) for word in words)
+        
+        # Calculate Flesch-Kincaid grade level
+        flesch_kincaid = (0.39 * (num_words / num_sentences) + 
+                          11.8 * (total_syllables / num_words) - 15.59)
+        
+        return {
+            'Flesch_Kincaid_Grade': round(max(0, flesch_kincaid), 2)  # Ensure non-negative
+        }
+    
+    def calculate_readability_metrics(self, text: str) -> Dict:
+        """
+        Calculate all readability metrics
+        """
+        fog_results = self.calculate_fog_index(text)
+        flesch_kincaid_results = self.calculate_flesch_kincaid(text)
+        
+        # Combine results
+        readability_results = {}
+        readability_results.update(fog_results)
+        readability_results.update(flesch_kincaid_results)
+        
+        return readability_results
     
     def analyze_loughran_mcdonald(self, text: str) -> Dict:
         """
@@ -138,10 +294,10 @@ class TextualAnalyzer:
         scores = self.vader_analyzer.polarity_scores(text)
         
         return {
-            'VADER_negative': scores['neg'],
-            'VADER_neutral': scores['neu'],
-            'VADER_positive': scores['pos'],
-            'VADER_compound': scores['compound']  # Key metric: -1 to +1
+            'VADER_negative': round(scores['neg'], 4),
+            'VADER_neutral': round(scores['neu'], 4),
+            'VADER_positive': round(scores['pos'], 4),
+            'VADER_compound': round(scores['compound'], 4)  # Key metric: -1 to +1
         }
     
     def analyze_opinion_lexicon(self, text: str) -> Dict:
@@ -187,24 +343,26 @@ class TextualAnalyzer:
     
     def analyze_text(self, text: str) -> Dict:
         """
-        Perform comprehensive analysis on a text using all three dictionaries
+        Perform comprehensive analysis on a text using all three dictionaries plus readability metrics
         """
         lm_results = self.analyze_loughran_mcdonald(text)
         vader_results = self.analyze_vader(text)
         opinion_results = self.analyze_opinion_lexicon(text)
+        readability_results = self.calculate_readability_metrics(text)
         
         # Combine all results
         combined_results = {}
         combined_results.update(lm_results)
         combined_results.update(vader_results)
         combined_results.update(opinion_results)
+        combined_results.update(readability_results)
         
         return combined_results
     
     def analyze_excel_column(self, excel_file: str, sheet_name: str, column_name: str, 
                             output_file: str = None) -> pd.DataFrame:
         """
-        Analyze a column in an Excel file using all three dictionaries
+        Analyze a column in an Excel file using all three dictionaries plus readability metrics
         
         Parameters:
         -----------
