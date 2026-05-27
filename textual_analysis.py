@@ -1,91 +1,54 @@
 """
-Textual Analysis using Loughran McDonald, LIWC, and Harvard Dictionary
+Textual Analysis using Loughran McDonald, VADER, and NLTK Opinion Lexicon
 This script analyzes text from an Excel file column using three different sentiment/lexicon dictionaries.
+
+Dictionaries Used:
+1. Loughran McDonald - Financial sentiment analysis (pyloughranmcdonald)
+2. VADER - Valence Aware Dictionary and sEntiment Reasoner (from nltk)
+3. NLTK Opinion Lexicon - General sentiment analysis (Harvard IV-4 based)
 """
 
 import pandas as pd
 import numpy as np
 import re
 from pathlib import Path
-from collections import defaultdict
 from typing import Dict, List, Tuple
+import nltk
+from nltk.sentiment import SentimentIntensityAnalyzer
+from nltk.corpus import opinion_lexicon
+from pyloughranmcdonald import LMClassifier
 
-# Install required packages:
-# pip install pandas openpyxl loughran-mcdonald textblob nltk
+# Download required NLTK data
+try:
+    nltk.data.find('sentiment/vader_lexicon')
+except LookupError:
+    nltk.download('vader_lexicon')
+
+try:
+    nltk.data.find('corpora/opinion_lexicon')
+except LookupError:
+    nltk.download('opinion_lexicon')
 
 
 class TextualAnalyzer:
     """
-    Performs textual analysis using three different dictionaries:
-    1. Loughran McDonald Dictionary (financial sentiment)
-    2. LIWC (Linguistic Inquiry and Word Count)
-    3. Harvard Dictionary (general sentiment)
+    Performs textual analysis using three professional dictionaries:
+    1. Loughran McDonald Dictionary (financial sentiment via pyloughranmcdonald)
+    2. VADER (Valence Aware Dictionary and sEntiment Reasoner)
+    3. NLTK Opinion Lexicon (Harvard IV-4 based)
     """
     
     def __init__(self):
         """Initialize the analyzer with dictionaries"""
-        self.lm_dict = self._load_loughran_mcdonald()
-        self.liwc_dict = self._load_liwc()
-        self.harvard_dict = self._load_harvard()
-    
-    def _load_loughran_mcdonald(self) -> Dict:
-        """
-        Load Loughran McDonald dictionary
-        This dictionary is specifically designed for financial text analysis
-        """
-        try:
-            from loughran_mcdonald import loughran_mcdonald
-            return loughran_mcdonald
-        except ImportError:
-            print("Loughran McDonald dictionary not found. Installing...")
-            import subprocess
-            subprocess.check_call(["pip", "install", "loughran-mcdonald"])
-            from loughran_mcdonald import loughran_mcdonald
-            return loughran_mcdonald
-    
-    def _load_liwc(self) -> Dict:
-        """
-        Load LIWC dictionary (Linguistic Inquiry and Word Count)
-        This is a comprehensive dictionary for linguistic analysis
+        # Initialize Loughran McDonald classifier
+        self.lm_classifier = LMClassifier()
         
-        Note: The full LIWC dictionary requires a license.
-        Using a simplified version or alternative like textblob/vader
-        """
-        # Using simplified LIWC-like categories
-        liwc_categories = {
-            'positive': ['good', 'great', 'excellent', 'amazing', 'wonderful', 'fantastic', 
-                        'awesome', 'perfect', 'love', 'best', 'beautiful', 'happy', 'joy'],
-            'negative': ['bad', 'awful', 'terrible', 'horrible', 'worst', 'hate', 'ugly',
-                        'sad', 'pain', 'poor', 'wrong', 'evil', 'fail', 'failed'],
-            'cognitive': ['think', 'know', 'believe', 'understand', 'remember', 'consider',
-                         'aware', 'realize', 'recognize', 'determine', 'decide'],
-            'affective': ['feel', 'happy', 'sad', 'angry', 'afraid', 'ashamed', 'lonely',
-                         'nervous', 'anxious', 'depressed', 'worried'],
-            'social': ['talk', 'communicate', 'meet', 'friend', 'love', 'listen', 'help',
-                      'together', 'share', 'family', 'community'],
-            'temporal': ['before', 'after', 'during', 'while', 'when', 'then', 'now',
-                        'today', 'tomorrow', 'yesterday', 'always', 'never']
-        }
-        return liwc_categories
-    
-    def _load_harvard(self) -> Dict:
-        """
-        Load Harvard Dictionary (General Inquirer)
-        A comprehensive dictionary for sentiment and semantic analysis
-        """
-        harvard_dict = {
-            'positive': ['good', 'excellent', 'great', 'fine', 'best', 'better', 'well',
-                        'happy', 'joy', 'love', 'beautiful', 'nice', 'wonderful', 'perfect',
-                        'success', 'successful', 'win', 'won', 'gain', 'benefit', 'advantage'],
-            'negative': ['bad', 'awful', 'terrible', 'worse', 'worst', 'poor', 'evil',
-                        'sad', 'sorrowful', 'hate', 'ugly', 'fail', 'failure', 'loss',
-                        'damage', 'harm', 'risk', 'danger', 'problem', 'issue'],
-            'uncertain': ['maybe', 'perhaps', 'possibly', 'might', 'could', 'probably',
-                         'somewhat', 'fairly', 'rather', 'quite', 'unclear', 'unknown'],
-            'litigious': ['lawsuit', 'litigation', 'arbitration', 'regulatory', 'alleged',
-                         'complaint', 'defend', 'judgment', 'accused', 'violation']
-        }
-        return harvard_dict
+        # Initialize VADER sentiment analyzer
+        self.vader_analyzer = SentimentIntensityAnalyzer()
+        
+        # Load NLTK Opinion Lexicon (Harvard IV-4 based)
+        self.opinion_positive_words = set(opinion_lexicon.positive())
+        self.opinion_negative_words = set(opinion_lexicon.negative())
     
     def preprocess_text(self, text: str) -> List[str]:
         """
@@ -107,120 +70,134 @@ class TextualAnalyzer:
     
     def analyze_loughran_mcdonald(self, text: str) -> Dict:
         """
-        Analyze text using Loughran McDonald dictionary
-        Focuses on financial sentiment
-        """
-        words = self.preprocess_text(text)
+        Analyze text using Loughran McDonald dictionary (Financial Sentiment)
         
-        # Categories in Loughran McDonald
-        categories = {
-            'positive': 0,
-            'negative': 0,
-            'uncertainty': 0,
-            'litigious': 0,
-            'modal_strong': 0,
-            'modal_weak': 0
+        Uses the official pyloughranmcdonald library for accurate financial sentiment analysis.
+        
+        Categories:
+        - positive: Financial gains, profits, growth
+        - negative: Losses, decline, risk
+        - uncertainty: Uncertain, vague terms
+        - litigious: Legal and regulatory terms
+        - constraining: Risk and uncertainty modifiers
+        - strong_modal: Will, must, definitely
+        - weak_modal: May, might, could
+        """
+        score = self.lm_classifier.score(text)
+        
+        # Extract raw counts
+        lm_results = {
+            'LM_positive_count': score.get('positive', 0),
+            'LM_negative_count': score.get('negative', 0),
+            'LM_uncertainty_count': score.get('uncertainty', 0),
+            'LM_litigious_count': score.get('litigious', 0),
+            'LM_constraining_count': score.get('constraining', 0),
+            'LM_strong_modal_count': score.get('strong_modal', 0),
+            'LM_weak_modal_count': score.get('weak_modal', 0),
         }
         
-        # Simplified LM dictionary
-        lm_positive = ['positive', 'good', 'gain', 'profit', 'increase', 'strength', 'strong', 'growth']
-        lm_negative = ['negative', 'loss', 'decline', 'weak', 'weakness', 'risk', 'fail', 'failed']
-        lm_uncertainty = ['uncertain', 'uncertainty', 'unclear', 'vague', 'may', 'might', 'possible']
-        lm_litigious = ['litigation', 'lawsuit', 'legal', 'regulatory', 'alleged', 'complaint']
-        lm_modal_strong = ['will', 'must', 'should', 'definitely', 'certainly']
-        lm_modal_weak = ['may', 'might', 'could', 'perhaps', 'possibly']
-        
-        for word in words:
-            if word in lm_positive:
-                categories['positive'] += 1
-            elif word in lm_negative:
-                categories['negative'] += 1
-            elif word in lm_uncertainty:
-                categories['uncertainty'] += 1
-            elif word in lm_litigious:
-                categories['litigious'] += 1
-            elif word in lm_modal_strong:
-                categories['modal_strong'] += 1
-            elif word in lm_modal_weak:
-                categories['modal_weak'] += 1
-        
-        # Calculate ratios
+        # Calculate total word count for ratios
+        words = self.preprocess_text(text)
         total_words = len(words)
-        if total_words > 0:
-            for key in categories:
-                categories[f'{key}_ratio'] = categories[key] / total_words
-        else:
-            for key in categories:
-                categories[f'{key}_ratio'] = 0
         
-        return {f'LM_{k}': v for k, v in categories.items()}
+        # Add ratios
+        for key, value in lm_results.items():
+            ratio_key = key.replace('_count', '_ratio')
+            lm_results[ratio_key] = value / total_words if total_words > 0 else 0
+        
+        # Calculate net sentiment (positive - negative)
+        lm_results['LM_net_sentiment'] = (lm_results['LM_positive_count'] - 
+                                          lm_results['LM_negative_count'])
+        
+        return lm_results
     
-    def analyze_liwc(self, text: str) -> Dict:
+    def analyze_vader(self, text: str) -> Dict:
         """
-        Analyze text using LIWC-like categories
+        Analyze text using VADER (Valence Aware Dictionary and sEntiment Reasoner)
+        
+        VADER is specifically designed for social media and modern text.
+        It's excellent for capturing nuanced sentiment including emoticons, slang, etc.
+        
+        Returns:
+        - negative: Proportion of negative sentiment (0-1)
+        - neutral: Proportion of neutral sentiment (0-1)
+        - positive: Proportion of positive sentiment (0-1)
+        - compound: Normalized composite sentiment score (-1 to +1)
+          * -1.0 = most negative
+          * +1.0 = most positive
+          * -0.05 to +0.05 = neutral
+        """
+        if pd.isna(text):
+            return {
+                'VADER_negative': 0,
+                'VADER_neutral': 0,
+                'VADER_positive': 0,
+                'VADER_compound': 0
+            }
+        
+        scores = self.vader_analyzer.polarity_scores(text)
+        
+        return {
+            'VADER_negative': scores['neg'],
+            'VADER_neutral': scores['neu'],
+            'VADER_positive': scores['pos'],
+            'VADER_compound': scores['compound']  # Key metric: -1 to +1
+        }
+    
+    def analyze_opinion_lexicon(self, text: str) -> Dict:
+        """
+        Analyze text using NLTK Opinion Lexicon (Harvard IV-4 based)
+        
+        The Opinion Lexicon is derived from the Harvard IV-4 dictionary,
+        which is a well-established general-purpose sentiment dictionary
+        used in academic research for decades.
+        
+        Categories:
+        - positive_count: Count of positive words
+        - negative_count: Count of negative words
+        - ratio: (positive - negative) / (positive + negative)
+        - sentiment_score: -1 to +1 scale
         """
         words = self.preprocess_text(text)
         
-        categories = {category: 0 for category in self.liwc_dict.keys()}
+        positive_count = sum(1 for word in words if word in self.opinion_positive_words)
+        negative_count = sum(1 for word in words if word in self.opinion_negative_words)
         
-        for word in words:
-            for category, word_list in self.liwc_dict.items():
-                if word in word_list:
-                    categories[category] += 1
+        opinion_results = {
+            'Opinion_Lexicon_positive_count': positive_count,
+            'Opinion_Lexicon_negative_count': negative_count,
+        }
         
         # Calculate ratios
         total_words = len(words)
-        results = {}
-        for category, count in categories.items():
-            results[f'LIWC_{category}_count'] = count
-            results[f'LIWC_{category}_ratio'] = count / total_words if total_words > 0 else 0
+        opinion_results['Opinion_Lexicon_positive_ratio'] = (positive_count / total_words 
+                                                             if total_words > 0 else 0)
+        opinion_results['Opinion_Lexicon_negative_ratio'] = (negative_count / total_words 
+                                                             if total_words > 0 else 0)
         
-        return results
-    
-    def analyze_harvard(self, text: str) -> Dict:
-        """
-        Analyze text using Harvard Dictionary
-        """
-        words = self.preprocess_text(text)
-        
-        categories = {category: 0 for category in self.harvard_dict.keys()}
-        
-        for word in words:
-            for category, word_list in self.harvard_dict.items():
-                if word in word_list:
-                    categories[category] += 1
-        
-        # Calculate ratios and sentiment score
-        total_words = len(words)
-        results = {}
-        for category, count in categories.items():
-            results[f'Harvard_{category}_count'] = count
-            results[f'Harvard_{category}_ratio'] = count / total_words if total_words > 0 else 0
-        
-        # Calculate sentiment score
-        positive = categories.get('positive', 0)
-        negative = categories.get('negative', 0)
-        
-        if (positive + negative) > 0:
-            results['Harvard_sentiment_score'] = (positive - negative) / (positive + negative)
+        # Calculate sentiment score (-1 to +1)
+        if (positive_count + negative_count) > 0:
+            opinion_results['Opinion_Lexicon_sentiment_score'] = (
+                (positive_count - negative_count) / (positive_count + negative_count)
+            )
         else:
-            results['Harvard_sentiment_score'] = 0
+            opinion_results['Opinion_Lexicon_sentiment_score'] = 0
         
-        return results
+        return opinion_results
     
     def analyze_text(self, text: str) -> Dict:
         """
         Perform comprehensive analysis on a text using all three dictionaries
         """
         lm_results = self.analyze_loughran_mcdonald(text)
-        liwc_results = self.analyze_liwc(text)
-        harvard_results = self.analyze_harvard(text)
+        vader_results = self.analyze_vader(text)
+        opinion_results = self.analyze_opinion_lexicon(text)
         
         # Combine all results
         combined_results = {}
         combined_results.update(lm_results)
-        combined_results.update(liwc_results)
-        combined_results.update(harvard_results)
+        combined_results.update(vader_results)
+        combined_results.update(opinion_results)
         
         return combined_results
     
